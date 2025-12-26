@@ -1,0 +1,76 @@
+import cv2
+import numpy as np
+
+# เปิดกล้อง
+cap = cv2.VideoCapture(0)  # หรือใส่ index ของกล้องที่คุณใช้งาน cv2.VideoCapture(_______)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    # แปลงภาพจาก BGR เป็น HSV
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+#==================================================================================
+    lower_lightblue = np.array([111, 20, 113])
+    upper_lightblue = np.array([153, 255, 255])
+    mask_lightblue = cv2.inRange(hsv, lower_lightblue, upper_lightblue)
+
+    #    lower_.... = np.array([___,___,___])
+    #    upper_.... = np.array([___,___,___])
+    #    mask_.... = cv2.inRange(frame_hsv, lower_....., upper_.....)
+#==================================================================================
+    # กำหนดช่วงของสีแดงใน HSV (อาจต้องปรับตาม lighting จริง)
+    # lower_red1 = np.array([0, 100, 100])
+    # upper_red1 = np.array([10, 255, 255])
+    # lower_red2 = np.array([160, 100, 100])
+    # upper_red2 = np.array([179, 255, 255])
+
+    # สร้าง mask สำหรับสีแดง
+    # mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+    # mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+    # mask = mask1 + mask2
+#==================================================================================
+    # หาคอนทัวร์ของวัตถุ
+    contours, _ = cv2.findContours(mask_lightblue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+#==================================================================================
+    height, width, _ = frame.shape 
+    cam_center = (int(width / 2), int(height / 2))
+
+    if contours:
+        # ใช้คอนทัวร์ที่ใหญ่ที่สุด
+        c = max(contours, key=cv2.contourArea)
+        M = cv2.moments(c)
+
+        if M["m00"] != 0:
+            # คำนวณ centroid ของวัตถุ
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            offset_x = cx - cam_center[0]
+            offset_y = cy - cam_center[1]
+            #__________________________________________________________________________________________________________________
+            # หลังจากได้ offset_x, offset_y
+            # mm_per_pixel = ____  # ต้องคาลิเบรตค่านี้ด้วยของจริง
+            offset_x_mm = offset_x * 0.525  #mm_per_pixel
+            offset_y_mm = offset_y * 0.4821   #mm_per_pixel
+            #__________________________________________________________________________________________________________________
+
+            # แสดงผล
+            cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)
+            cv2.line(frame, cam_center, (cx, cy), (255, 255, 255), 2)
+
+            cv2.putText(frame, f"Offset: ({offset_x_mm:.1f} mm, {offset_y_mm:.1f} mm)", 
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+            cv2.putText(frame, f"Offset: ({offset_x} pixel, {offset_y} pixel)", (10, 100),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+    # แสดงกล้อง
+    cv2.imshow("Camera", frame)
+    #cv2.imshow("Mask", mask)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
