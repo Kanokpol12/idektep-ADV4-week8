@@ -10,11 +10,21 @@ class ColorDetectionApp:
         self.window.title(window_title)
         
         # OpenCV video capture
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture(0) # ลองเปลี่ยนเป็น 0 หรือ 1 ตามกล้องที่มี
+        
         if not self.cap.isOpened():
             print("Cannot open camera")
             exit()
             
+        # ตั้งค่าความละเอียด
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
+        # อ่านขนาดจริง
+        self.vid_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.vid_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(f"Camera Resolution: {self.vid_width}x{self.vid_height}")
+
         # Default HSV range values
         self.lower_h = tk.IntVar(value=0)
         self.lower_s = tk.IntVar(value=50)
@@ -41,7 +51,7 @@ class ColorDetectionApp:
         self.video_frame = ttk.Frame(main_frame, borderwidth=2, relief="sunken")
         self.video_frame.grid(row=0, column=0, padx=5, pady=5)
         
-        self.canvas = tk.Canvas(self.video_frame, width=640, height=480)
+        self.canvas = tk.Canvas(self.video_frame, width=self.vid_width, height=self.vid_height)
         self.canvas.pack()
         
         # Controls frame
@@ -101,8 +111,8 @@ class ColorDetectionApp:
     def set_preset(self, color):
         presets = {
             "red": ([0, 100, 100], [10, 255, 255]), 
-            "green": ([62.55, 39.76, 104.2], [159.75, 255, 255]),
-            "blue": ([94.31, 45.24, 134.35], [158.8, 255, 255]),
+            "green": ([36, 25, 25], [86, 255, 255]), # ปรับค่า Green ให้อ่อนไหวขึ้นเล็กน้อย
+            "blue": ([94, 80, 2], [126, 255, 255]),
             "yellow": ([20, 100, 100], [30, 255, 255]),
             "orange": ([10, 100, 20], [25, 255, 255]),
             "purple": ([125, 50, 50], [155, 255, 255])
@@ -120,14 +130,8 @@ class ColorDetectionApp:
     def update(self):
         ret, frame = self.cap.read()
         if ret:
-            # Process the frame for color detection
             processed_frame = self.detect_color(frame)
-            processed_frame = processed_frame[80:250, 150:440]
-            
-            # Convert from BGR to RGB 
             self.photo = self.convert_frame_to_photo(processed_frame)
-            
-            # Update the canvas
             self.canvas.create_image(0, 0, image=self.photo, anchor=tk.NW)
         
         self.window.after(self.delay, self.update)
@@ -140,19 +144,60 @@ class ColorDetectionApp:
         lower_color = np.array([self.lower_h.get(), self.lower_s.get(), self.lower_v.get()])
         upper_color = np.array([self.upper_h.get(), self.upper_s.get(), self.upper_v.get()])
         
-        # Create mask for the specified color range
+        # Create mask
         mask = cv2.inRange(hsv, lower_color, upper_color)
         
-        # Apply the mask to the original image
+        # Apply mask
         result = cv2.bitwise_and(frame, frame, mask=mask)
         
-        # Combine original and masked images for better visualization
+        # Combine visual
         alpha = 0.7 
         combined = cv2.addWeighted(frame, alpha, result, 1 - alpha, 0)
         
-        # Draw contours around detected areas
+        # Find Contours
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(combined, contours, -1, (0, 255, 0), 2)
+        
+        # --- [ส่วนที่เพิ่มใหม่: วนลูปเช็คทุก Contours เพื่อหารูปทรง] ---
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            
+            # กรอง Noise: ถ้าพื้นที่เล็กกว่า 500 pixel ไม่ต้องสนใจ
+            if area > 1000:
+                # วาดเส้นขอบวัตถุ
+                cv2.drawContours(combined, [cnt], -1, (0, 255, 0), 2)
+                
+                # หาความยาวเส้นรอบรูป
+                peri = cv2.arcLength(cnt, True)
+                
+                # ประมาณจุดมุม (Approximation) ค่า 0.04 สามารถปรับได้ (ยิ่งเยอะยิ่งหยาบ)
+                approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
+                
+                # หาตำแหน่งสำหรับวางข้อความ
+                x, y, w, h = cv2.boundingRect(approx)
+                objType = "Unidentified"
+                
+                # เช็คจำนวนมุม
+                objCor = len(approx)
+                
+                if objCor == 3:
+                    objType = "Triangle"
+                elif objCor == 4:
+                    # เช็คว่าเป็นสี่เหลี่ยมจัตุรัสหรือผืนผ้า
+                    aspectRatio = float(w)/h
+                    if 0.95 < aspectRatio < 1.05: # อัตราส่วนใกล้เคียง 1
+                        objType = "Square"
+                    else:
+                        objType = "Rectangle"
+                elif objCor > 4:
+                    # มุมเยอะๆ มักจะเป็นวงกลม
+                    objType = "Circle"
+                
+                # ใส่ข้อความและกรอบสี่เหลี่ยมรอบวัตถุ
+                cv2.rectangle(combined, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                cv2.putText(combined, objType, 
+                            (x + (w // 2) - 10, y + (h // 2) - 10), 
+                            cv2.FONT_HERSHEY_COMPLEX, 0.7, 
+                            (255, 255, 255), 2) # สีข้อความขาว
         
         return combined
     
@@ -166,8 +211,7 @@ class ColorDetectionApp:
         if hasattr(self, 'cap'):
             self.cap.release()
 
-# Start the application
 if __name__ == "__main__":
     root = tk.Tk()
-    app = ColorDetectionApp(root, "Real-time Color Detection")
+    app = ColorDetectionApp(root, "Real-time Shape & Color Detection")
     root.mainloop()
